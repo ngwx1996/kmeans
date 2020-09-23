@@ -1,0 +1,63 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30413.136
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kmeans_seq", "kmeans_seq\kmeans_seq.vcxproj", "{3DAAE496-3EC8-46BE-92B1-8C85390E8196}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kmeans_cuda", "kmeans_cuda\kmeans_cuda.vcxproj", "{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kmeans_thrust", "kmeans_thrust\kmeans_thrust.vcxproj", "{F2149E70-3F7B-4E31-8D79-B0DC74532388}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kmeans_cuda_atomic", "kmeans_cuda_atomic\kmeans_cuda_atomic.vcxproj", "{D7A18084-B6C8-4947-AEFC-294600C6401F}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kmeans_thrust_atomic", "kmeans_thrust_atomic\kmeans_thrust_atomic.vcxproj", "{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Debug|x64.ActiveCfg = Debug|x64
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Debug|x64.Build.0 = Debug|x64
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Debug|x86.ActiveCfg = Debug|Win32
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Debug|x86.Build.0 = Debug|Win32
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Release|x64.ActiveCfg = Release|x64
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Release|x64.Build.0 = Release|x64
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Release|x86.ActiveCfg = Release|Win32
+		{3DAAE496-3EC8-46BE-92B1-8C85390E8196}.Release|x86.Build.0 = Release|Win32
+		{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}.Debug|x64.ActiveCfg = Debug|x64
+		{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}.Debug|x64.Build.0 = Debug|x64
+		{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}.Debug|x86.ActiveCfg = Debug|x64
+		{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}.Release|x64.ActiveCfg = Release|x64
+		{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}.Release|x64.Build.0 = Release|x64
+		{C4BEDD5B-9053-4311-B9BA-24CB4F20D0F8}.Release|x86.ActiveCfg = Release|x64
+		{F2149E70-3F7B-4E31-8D79-B0DC74532388}.Debug|x64.ActiveCfg = Debug|x64
+		{F2149E70-3F7B-4E31-8D79-B0DC74532388}.Debug|x64.Build.0 = Debug|x64
+		{F2149E70-3F7B-4E31-8D79-B0DC74532388}.Debug|x86.ActiveCfg = Debug|x64
+		{F2149E70-3F7B-4E31-8D79-B0DC74532388}.Release|x64.ActiveCfg = Release|x64
+		{F2149E70-3F7B-4E31-8D79-B0DC74532388}.Release|x64.Build.0 = Release|x64
+		{F2149E70-3F7B-4E31-8D79-B0DC74532388}.Release|x86.ActiveCfg = Release|x64
+		{D7A18084-B6C8-4947-AEFC-294600C6401F}.Debug|x64.ActiveCfg = Debug|x64
+		{D7A18084-B6C8-4947-AEFC-294600C6401F}.Debug|x64.Build.0 = Debug|x64
+		{D7A18084-B6C8-4947-AEFC-294600C6401F}.Debug|x86.ActiveCfg = Debug|x64
+		{D7A18084-B6C8-4947-AEFC-294600C6401F}.Release|x64.ActiveCfg = Release|x64
+		{D7A18084-B6C8-4947-AEFC-294600C6401F}.Release|x64.Build.0 = Release|x64
+		{D7A18084-B6C8-4947-AEFC-294600C6401F}.Release|x86.ActiveCfg = Release|x64
+		{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}.Debug|x64.ActiveCfg = Debug|x64
+		{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}.Debug|x64.Build.0 = Debug|x64
+		{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}.Debug|x86.ActiveCfg = Debug|x64
+		{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}.Release|x64.ActiveCfg = Release|x64
+		{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}.Release|x64.Build.0 = Release|x64
+		{FB853EA8-F32D-4629-A2FE-ACA16F8CD87F}.Release|x86.ActiveCfg = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C9C581B7-8084-491A-AD2A-D70FFDB1B2D9}
+	EndGlobalSection
+EndGlobal
