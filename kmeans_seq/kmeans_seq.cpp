@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
     cout << "---Sequential---" << endl;
     int k = 5;
     int iters = 300;
-    string filename = "test100000.csv";
+    string filename = "test3d100000.csv";
     ifstream infile(filename.c_str());
 
     if (!infile.is_open()) {

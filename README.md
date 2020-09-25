@@ -11,12 +11,14 @@ For more information: https://towardsdatascience.com/k-means-clustering-algorith
 ## Build and run
 Visual Studio with CUDA required.<br />
 To run the project, open the solution in Visual Studio.<br />
-Change the k value, number of iterations, and file name in the main functions of each code.<br />
+Change the variables in the main functions of each code. See default for an example.<br />
 --Default--
 k = 5<br />
 iter = 300<br />
+vecSize = 100000<br/>
+dimensions = 2<br/>
 filename = test100000.csv<br />
-To get the best performance, the code should be run in Release mode. Thrust might also error in debug mode.<br />
+To get the best performance, the code should be executed in Release mode. Thrust will error in debug mode.<br />
 
 ## Project structure
 
@@ -44,7 +46,7 @@ kmeans
 
 ## Sequential
   * **Main** <br />
-    Main function where the user can change the k value, iterations, and filename. Loads values into a vector of points and computes kmeans with them. Exits while loop when all clusters converges to local minima.<br />
+    Main function where the user can change the k value, iterations, dimension, number of points, and filename. Loads values into a vector of points, pointVec, and computes kmeans with them. Exits while loop when all clusters converges to local minima.<br />
     
   * **getNearestCluster** <br />
     Given a point and the clusters, find the nearest cluster corresponding to the point. Determined finding the minimum distance to each cluster's centroid. <br />
@@ -88,15 +90,23 @@ kmeans
 
 ### Experiment
 
-|  | n = 1000 | n = 100000 |
-|--|--|--|
-| Sequential | 12762μs | 7367568μs |
-| Cuda Atomic | **929μs** |  22802μs |
-| Thrust Atomic | 2715μs | 30885μs |
-| Cuda Shared & Reduce | 1066μs | 11681μs |
-| Thrust Shared & Reduce| 1265μs | **11298μs** |
+| Dimensions = 2 | n = 1000 | n = 100000 | Speedup (n = 1000)| Speedup (n = 100000)|
+|--|--|--|--|--|
+| Sequential | 12762μs | 7367568μs | --- | --- |
+| Cuda Atomic | **929μs** |  22802μs | **13.75x** | 323.11x |
+| Thrust Atomic | 2715μs | 30885μs | 4.70x | 238.55x |
+| Cuda Shared & Reduce | 1066μs | 11681μs | 11.89x | 630.73x |
+| Thrust Shared & Reduce| 1265μs | **11298μs** | 10.02x | **652.11x**|
 
-  
+| Dimensions = 3 | n = 1000 | n = 100000 | Speedup (n = 1000)| Speedup (n = 100000)|
+|--|--|--|--|--|
+| Sequential | 35601μs | 12458616μs | --- | --- |
+| Cuda Atomic | **1575μs** |  44175μs | **22.60x** | 282.03x |
+| Thrust Atomic | 3542μs | 45813μs | 10.05x | 271.94x |
+| Cuda Shared & Reduce | 2357μs | **17905μs** | 15.10x | **695.82x** |
+| Thrust Shared & Reduce| 2567μs | 19290μs | 13.87x | 645.86x |
+
+
 ## Conclusion
 Using CUDA or Thrust to perform parallel computation with n > 1000 results in a speedup of more than 5x compared to sequential computation. <br />
 For n = 1000, using shared memory instead of atomicadd() resulted in more time taken. This might be due to the short queue to atomically add values not requiring a long wait time, which outperformed the time taken to initialize shared memory.

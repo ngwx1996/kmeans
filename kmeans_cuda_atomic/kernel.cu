@@ -11,30 +11,31 @@
 
 using namespace std;
 
-__global__ void setClusters(float* x, float* y, int* cur_cluster, float* means_x, float* means_y, 
-                            float* sums_x, float* sums_y, int vecSize, int k, int* counter, int* done) {
+__global__ void setClusters(float* pointVec, int* cur_cluster, float* means, 
+                            float* sums, int vecSize, int k, int dimensions, int* counter, int* done) {
     extern __shared__ float shared_means[];
     // idx corresponds to point id
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= vecSize)
         return;
 
-    if (threadIdx.x < k) {
+    if (threadIdx.x < k * dimensions) {
         // Put means into shared memory to reduce time to take from global memory
-        shared_means[threadIdx.x] = means_x[threadIdx.x];
-        shared_means[threadIdx.x + k] = means_y[threadIdx.x];
+        shared_means[threadIdx.x] = means[threadIdx.x];
     }
     __syncthreads();
 
-    float cur_x = x[idx];
-    float cur_y = y[idx];
     float minDist = FLT_MAX;
     int bestCluster = INT_MAX;
     float distance;
 
     // Find best cluster for each point
     for (int i = 0; i < k; i++) {
-        distance = (cur_x - shared_means[i]) * (cur_x - shared_means[i]) + (cur_y - shared_means[i + k]) * (cur_y - shared_means[i + k]);
+        distance = 0;
+        for (int j = 0; j < dimensions; j++)
+        {
+            distance += (pointVec[idx + vecSize * j] - shared_means[i + k * j]) * (pointVec[idx + vecSize * j] - shared_means[i + k * j]);
+        }
         if (distance < minDist) {
             minDist = distance;
             bestCluster = i;
@@ -48,25 +49,29 @@ __global__ void setClusters(float* x, float* y, int* cur_cluster, float* means_x
     }
 
     // Atomically add sums and counter with cluster
-    atomicAdd(&sums_x[bestCluster], cur_x);
-    atomicAdd(&sums_y[bestCluster], cur_y);
+    for (int i = 0; i < dimensions; i++) {
+        atomicAdd(&sums[bestCluster + k * i], pointVec[idx + vecSize * i]);
+    }
     atomicAdd(&counter[bestCluster], 1);
 }
 
-__global__ void getNewMeans(float* means_x, float* means_y, float* sums_x, float* sums_y, int* counter) {
+__global__ void getNewMeans(float* means, float* sums, int* counter, int k, int dimensions) {
     // Get new mean for each cluster
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int count = (counter[idx] != 0) ? counter[idx] : 1;
 
-    means_x[idx] = sums_x[idx] / count;
-    means_y[idx] = sums_y[idx] / count;
+    for (int i = 0; i < dimensions; i++) {
+        means[idx + k * i] = sums[idx + k * i] / count;
+    }
 }
 
 int main(int argc, char* argv[]) {
     cout << "---CUDA Atomic---" << endl;
     int k = 5;
     int iters = 300;
-    string filename = "test100000.csv";
+    int dimensions = 3;
+    int vecSize = 100000;
+    string filename = "test3d100000.csv";
     ifstream infile(filename.c_str());
     string line;
 
@@ -75,43 +80,49 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    vector<float> h_x;
-    vector<float> h_y;
+    vector<float> h_pointVec(dimensions * vecSize);
+
     float val;
     char eater;
+    int curPoint = 0;
+    int offset;
     // Add point to vector
     while (getline(infile, line)) {
         stringstream is(line);
-        is >> val;
-        h_x.push_back(val);
-        is >> eater;
-        is >> val;
-        h_y.push_back(val);
+        offset = 0;
+        while (is >> val) {
+            h_pointVec[curPoint + vecSize * offset] = val;
+            is >> eater;
+            offset++;
+        }
+        curPoint++;
     }
     infile.close();
     cout << "Fetched data successfully from " << filename << endl;
 
-    int vecSize = h_x.size();
-    float* d_x;
-    float* d_y;
+    float* d_pointVec;
     int* h_done = new int(0);
 
-    cudaMalloc(&d_x, vecSize * sizeof(float));
-    cudaMalloc(&d_y, vecSize * sizeof(float));
-    cudaMemcpy(d_x, h_x.data(), vecSize * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y, h_y.data(), vecSize * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_pointVec, dimensions * vecSize * sizeof(float));
+    cudaMemcpy(d_pointVec, h_pointVec.data(), dimensions * vecSize * sizeof(float), cudaMemcpyHostToDevice);
 
-    vector<float> h_means_x;
-    vector<float> h_means_y;
+    // each dimension has k size
+    vector<float> h_means(k * dimensions);
 
+    int check;
     // Initialize clusters
     for (int i = 0; i < k; i++) {
         while (true) {
             int idx = rand() % vecSize;
-            vector<float>::iterator it = find(h_means_x.begin(), h_means_x.end(), h_x[idx]);
-            if (it == h_means_x.end() || h_means_y[it - h_means_x.begin()] != h_y[idx]) {
-                h_means_x.push_back(h_x[idx]);
-                h_means_y.push_back(h_y[idx]);
+            check = 0;
+            for (int j = 0; j < dimensions; j++) {
+                if (find(h_means.begin() + k * j, h_means.begin() + k * (j + 1), h_pointVec[idx + vecSize * j])
+                    == h_means.begin() + k * (j + 1)) {
+                    check++;
+                }
+                h_means[i + j * k] = h_pointVec[idx + vecSize * j];
+            }
+            if (check > 0) {
                 break;
             }
         }
@@ -122,42 +133,36 @@ int main(int argc, char* argv[]) {
     cout << "Running K-means clustering" << endl;
 
     int* d_cur_cluster;
-    float* d_means_x;
-    float* d_means_y;
-    float* d_sums_x;
-    float* d_sums_y;
+    float* d_means;
+    float* d_sums;
     int* d_counter;
     int* d_done;
 
     cudaMalloc(&d_cur_cluster, vecSize * sizeof(int));
-    cudaMalloc(&d_means_x, k * sizeof(float));
-    cudaMalloc(&d_means_y, k * sizeof(float));
-    cudaMemcpy(d_means_x, h_means_x.data(), k * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_means_y, h_means_y.data(), k * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_sums_x, k * sizeof(float));
-    cudaMalloc(&d_sums_y, k * sizeof(float));
+    cudaMalloc(&d_means, k * dimensions *sizeof(float));
+    cudaMemcpy(d_means, h_means.data(), k * dimensions * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_sums, k * dimensions * sizeof(float));
     cudaMalloc(&d_counter, k * sizeof(int));
     cudaMalloc(&d_done, sizeof(int));
 
     int blockSize = 1024;
     int gridSize = (vecSize - 1) / blockSize + 1;
-    int sharedSize = 2 * k * sizeof(float);
+    int sharedSize = dimensions * k * sizeof(float);
 
     auto start = chrono::high_resolution_clock::now();
 
     int iter;
     for (iter = 0; iter < iters; iter++) {
         // Clear sum and counter array to prepare for new iteration
-        cudaMemset(d_sums_x, 0, k * sizeof(int));
-        cudaMemset(d_sums_y, 0, k * sizeof(int));
+        cudaMemset(d_sums, 0, k * dimensions * sizeof(int));
         cudaMemset(d_counter, 0, k * sizeof(int));
         cudaMemset(d_done, 0, sizeof(int));
 
         // For each point, find nearest cluster and add itself to the cluster's sum
-        setClusters << <gridSize, blockSize, sharedSize >> > (d_x, d_y, d_cur_cluster, d_means_x, d_means_y, d_sums_x, d_sums_y, vecSize, k, d_counter, d_done);
+        setClusters << <gridSize, blockSize, sharedSize >> > (d_pointVec, d_cur_cluster, d_means, d_sums, vecSize, k, dimensions, d_counter, d_done);
 
         // Get new mean of each cluster
-        getNewMeans << <1, k >> > (d_means_x, d_means_y, d_sums_x, d_sums_y, d_counter);
+        getNewMeans << <1, k >> > (d_means, d_sums, d_counter, k, dimensions);
 
         // Check if done became false(1), if so continue
         cudaMemcpy(h_done, d_done, sizeof(int), cudaMemcpyDeviceToHost);
@@ -169,12 +174,13 @@ int main(int argc, char* argv[]) {
     cout << "Clustering completed in iteration : " << iter << endl << endl;
     cout << "Time taken: " << chrono::duration_cast<chrono::microseconds>(end - start).count() << " microseconds" << endl;
 
-    cudaMemcpy(h_means_x.data(), d_means_x, k * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_means_y.data(), d_means_y, k * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_means.data(), d_means, k * dimensions * sizeof(float), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < k; i++) {
         cout << "Centroid in cluster " << i << " : ";
-        cout << h_means_x[i] << " " << h_means_y[i];
+        for (int j = 0; j < dimensions; j++) {
+            cout << h_means[i + k * j] << " ";
+        }
         cout << endl;
     }
 }

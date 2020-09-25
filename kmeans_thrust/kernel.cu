@@ -12,15 +12,13 @@
 
 using namespace std;
 
-__global__ void setClusters(thrust::device_ptr<float> x, thrust::device_ptr<float> y,
-                            thrust::device_ptr<int> cur_cluster,
-                            thrust::device_ptr<float> means_x, thrust::device_ptr<float> means_y, 
-                            thrust::device_ptr<float> sums_x, thrust::device_ptr<float> sums_y, 
-                            int vecSize, int k, thrust::device_ptr<int> counter, thrust::device_ptr<int> done) {
+__global__ void setClusters(thrust::device_ptr<float> pointVec, thrust::device_ptr<int> cur_cluster,
+                            thrust::device_ptr<float> means, thrust::device_ptr<float> sums, 
+                            int vecSize, int k, int dimensions, int gridSize, 
+                            thrust::device_ptr<int> counter, thrust::device_ptr<int> done) {
+    // Shared contains all dimensions, each with size blockDim.x
     extern __shared__ float shared[];
-    float* shared_x = shared;
-    float* shared_y = &shared_x[blockDim.x];
-    int* shared_count = (int*)&shared_y[blockDim.x];
+    int* shared_count = (int*)&shared[blockDim.x * dimensions];
 
     int localIdx = threadIdx.x;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -29,28 +27,29 @@ __global__ void setClusters(thrust::device_ptr<float> x, thrust::device_ptr<floa
         return;
 
     // Use shared mem to store means
-    if (localIdx < k) {
-        shared[localIdx] = means_x[localIdx];
-        shared[localIdx + k] = means_y[localIdx];
+    if (localIdx < k * dimensions) {
+        // Put all means into shared memory to reduce time to take from global memory
+        shared[threadIdx.x] = means[threadIdx.x];
     }
     __syncthreads();
 
     float minDist = FLT_MAX;
     int bestCluster = INT_MAX;
     float distance;
-    float cur_x;
-    float cur_y;
 
-    cur_x = x[idx];
-    cur_y = y[idx];
-
+    // Each thread = point. Calculate min distance to the best cluster from each point.
     for (int i = 0; i < k; i++) {
-        distance = (cur_x - shared[i]) * (cur_x - shared[i]) + (cur_y - shared[i + k]) * (cur_y - shared[i + k]);
+        distance = 0;
+        for (int j = 0; j < dimensions; j++)
+        {
+            distance += (pointVec[idx + vecSize * j] - shared[i + k * j]) * (pointVec[idx + vecSize * j] - shared[i + k * j]);
+        }
         if (distance < minDist) {
             minDist = distance;
             bestCluster = i;
         }
     }
+    // If new cluster is found, mark done as false (1) so host can continue iteration
     if (cur_cluster[idx] != bestCluster) {
         cur_cluster[idx] = bestCluster;
         done[0] = 1;
@@ -58,66 +57,75 @@ __global__ void setClusters(thrust::device_ptr<float> x, thrust::device_ptr<floa
 
     __syncthreads();
 
+    // For each cluster, find all points corresponding to it and add their values to a single sum
     for (int j = 0; j < k; j++) {
-        shared_x[localIdx] = (bestCluster == j) ? cur_x : 0;
-        shared_y[localIdx] = (bestCluster == j) ? cur_y : 0;
+        // If point in cur cluster, put it in shared mem
+        for (int curAxis = 0; curAxis < dimensions; curAxis++) {
+            shared[localIdx + curAxis * blockDim.x] = (bestCluster == j) ? pointVec[idx + vecSize * curAxis] : 0;
+        }
         shared_count[localIdx] = (bestCluster == j) ? 1 : 0;
-
         __syncthreads();
 
+        // Sum all values in cur cluster
         // Reduction to get sum at tid 0
         for (int d = blockDim.x >> 1; d > 0; d >>= 1) {
             if (localIdx < d && idx + d < vecSize) {
-                shared_x[localIdx] += shared_x[localIdx + d];
-                shared_y[localIdx] += shared_y[localIdx + d];
+                for (int curAxis = 0; curAxis < dimensions; curAxis++) {
+                    shared[localIdx + curAxis * blockDim.x] += shared[localIdx + curAxis * blockDim.x + d];
+                }
                 shared_count[localIdx] += shared_count[localIdx + d];
             }
             __syncthreads();
         }
 
-        // Value at tid 0
+        // Value at tid 0 has the block's ans
         if (localIdx == 0) {
-            int clusterIdx = blockIdx.x * k + j;
-            sums_x[clusterIdx] = shared_x[localIdx];
-            sums_y[clusterIdx] = shared_y[localIdx];
+            int clusterIdx = j + blockIdx.x * k;
+            for (int curAxis = 0; curAxis < dimensions; curAxis++) {
+                sums[clusterIdx + curAxis * k * gridSize] = shared[localIdx + curAxis * blockDim.x];
+            }
             counter[clusterIdx] = shared_count[localIdx];
         }
         __syncthreads();
     }
 }
 
-__global__ void getNewMeans(thrust::device_ptr<float> means_x, thrust::device_ptr<float> means_y, 
-                            thrust::device_ptr<float> sums_x, thrust::device_ptr<float> sums_y, 
-                            thrust::device_ptr<int> counter, int k) {
+__global__ void getNewMeans(thrust::device_ptr<float> means, thrust::device_ptr<float> sums, 
+                            thrust::device_ptr<int> counter, int k, int dimensions) {
+    // Shared will contain sums from all blocks in each dimension
     extern __shared__ float shared[];
-    float* shared_x = shared;
-    float* shared_y = &shared_x[blockDim.x];
-    int* shared_count = (int*)&shared_y[blockDim.x];
-
+    int* shared_count = (int*)&shared[dimensions * blockDim.x];
 
     int idx = threadIdx.x;
     int blocks = blockDim.x / k;
-    shared_x[idx] = sums_x[idx];
-    shared_y[idx] = sums_y[idx];
+    // Put sums into shared memory
+    for (int curAxis = 0; curAxis < dimensions; curAxis++) {
+        shared[idx + blockDim.x * curAxis] = sums[idx + blockDim.x * curAxis];
+    }
     shared_count[idx] = counter[idx];
-
+    
     __syncthreads();
 
     if (idx < k) {
+        // Add all sums for each cluster into the cluster (0 < x < k) idx
         for (int j = 1; j < blocks; j++) {
-            shared_x[idx] += shared_x[idx + j * k];
-            shared_y[idx] += shared_y[idx + j * k];
+            for (int curAxis = 0; curAxis < dimensions; curAxis++) {
+                shared[idx + blockDim.x * curAxis] += shared[idx + j * k + blockDim.x * curAxis];
+            }
             shared_count[idx] += shared_count[idx + j * k];
         }
-        __syncthreads;
     }
+    __syncthreads;
 
     if (idx < k) {
+        // Divide sum by count and put into means array
+        // Reset sum array
         int count = (shared_count[idx] > 0) ? shared_count[idx] : 1;
-        means_x[idx] = shared_x[idx] / count;
-        means_y[idx] = shared_y[idx] / count;
-        sums_x[idx] = 0;
-        sums_y[idx] = 0;
+
+        for (int curAxis = 0; curAxis < dimensions; curAxis++) {
+            means[idx + k * curAxis] = shared[idx + blockDim.x * curAxis] / count;
+            sums[idx + blockDim.x * curAxis] = 0;
+        }
         counter[idx] = 0;
     }
 }
@@ -126,7 +134,9 @@ int main(int argc, char* argv[]) {
     cout << "---Thrust---" << endl;
     int k = 5;
     int iters = 300;
-    string filename = "test100000.csv";
+    int dimensions = 3;
+    int vecSize = 100000;
+    string filename = "test3d100000.csv";
     ifstream infile(filename.c_str());
     string line;
 
@@ -135,35 +145,44 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    thrust::host_vector<float> h_x;
-    thrust::host_vector<float> h_y;
+    thrust::host_vector<float> h_pointVec(dimensions * vecSize);
+
     float val;
     char eater;
+    int curPoint = 0;
+    int offset;
+    // Add point to vector
     while (getline(infile, line)) {
         stringstream is(line);
-        is >> val;
-        h_x.push_back(val);
-        is >> eater;
-        is >> val;
-        h_y.push_back(val);
+        offset = 0;
+        while (is >> val) {
+            h_pointVec[curPoint + vecSize * offset] = val;
+            is >> eater;
+            offset++;
+        }
+        curPoint++;
     }
     infile.close();
     cout << "Fetched data successfully" << endl;
 
-    int vecSize = h_x.size();
-    thrust::device_vector<float> d_x = h_x;
-    thrust::device_vector<float> d_y = h_y;
+    thrust::device_vector<float> d_pointVec = h_pointVec;
 
-    thrust::host_vector<float> h_means_x;
-    thrust::host_vector<float> h_means_y;
+    thrust::host_vector<float> h_means(k * dimensions);
 
+    int check;
+    // Initialize clusters
     for (int i = 0; i < k; i++) {
         while (true) {
             int idx = rand() % vecSize;
-            thrust::host_vector<float>::iterator it = thrust::find(h_means_x.begin(), h_means_x.end(), h_x[idx]);
-            if (it == h_means_x.end() || h_means_y[it - h_means_x.begin()] != h_y[idx]) {
-                h_means_x.push_back(h_x[idx]);
-                h_means_y.push_back(h_y[idx]);
+            check = 0;
+            for (int j = 0; j < dimensions; j++) {
+                if (thrust::find(h_means.begin() + k * j, h_means.begin() + k * (j + 1), h_pointVec[idx + vecSize * j])
+                    == h_means.begin() + k * (j + 1)) {
+                    check++;
+                }
+                h_means[i + j * k] = h_pointVec[idx + vecSize * j];
+            }
+            if (check > 0) {
                 break;
             }
         }
@@ -175,14 +194,13 @@ int main(int argc, char* argv[]) {
 
     int blockSize = 1024;
     int gridSize = (vecSize - 1) / blockSize + 1;
-    int sharedSizeCluster = blockSize * (2 * sizeof(float) + sizeof(int));
-    int sharedSizeMeans = k * gridSize * (2 * sizeof(float) + sizeof(int));
+    // shared mem has 3 layers
+    int sharedSizeCluster = blockSize * (dimensions * sizeof(float) + sizeof(int));
+    int sharedSizeMeans = k * gridSize * (dimensions * sizeof(float) + sizeof(int));
 
-    thrust::device_vector<float> d_means_x = h_means_x;
-    thrust::device_vector<float> d_means_y = h_means_y;
-    thrust::device_vector<int> d_cur_cluster(vecSize, FLT_MAX);
-    thrust::device_vector<float> d_sums_x(k * gridSize);
-    thrust::device_vector<float> d_sums_y(k * gridSize);
+    thrust::device_vector<float> d_means = h_means;
+    thrust::device_vector<int> d_cur_cluster(vecSize, INT_MAX);
+    thrust::device_vector<float> d_sums(k * gridSize * dimensions);
     thrust::device_vector<int> d_counter(k * gridSize,0);
     thrust::device_vector<int> d_done(1, 0);
 
@@ -193,11 +211,10 @@ int main(int argc, char* argv[]) {
         // Clear done to prepare for new iteration
         thrust::fill(d_done.begin(), d_done.end(), 0);
 
-        setClusters << <gridSize, blockSize, sharedSizeCluster >> > (d_x.data(), d_y.data(), d_cur_cluster.data(), d_means_x.data(), d_means_y.data(), 
-                                                    d_sums_x.data(), d_sums_y.data(), vecSize, k, d_counter.data(), d_done.data());
+        setClusters << <gridSize, blockSize, sharedSizeCluster >> > (d_pointVec.data(), d_cur_cluster.data(), d_means.data(), 
+                                                    d_sums.data(), vecSize, k, dimensions, gridSize, d_counter.data(), d_done.data());
 
-        getNewMeans << <1, k * gridSize, sharedSizeMeans >> > (d_means_x.data(), d_means_y.data(), d_sums_x.data(), 
-                                    d_sums_y.data(), d_counter.data(), k);
+        getNewMeans << <1, k * gridSize, sharedSizeMeans >> > (d_means.data(), d_sums.data(), d_counter.data(), k, dimensions);
 
         if (d_done[0] == 0)
             break;
@@ -209,7 +226,9 @@ int main(int argc, char* argv[]) {
 
     for (int i = 0; i < k; i++) {
         cout << "Centroid in cluster " << i << " : ";
-        cout << d_means_x[i] << " " << d_means_y[i];
+        for (int j = 0; j < dimensions; j++) {
+            cout << d_means[i + k * j] << " ";
+        }
         cout << endl;
     }
 }
